@@ -1,6 +1,6 @@
 // s3-pdf.service.ts
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { PDFParse } from 'pdf-parse';
 import { Readable } from 'stream';
 
@@ -21,6 +21,10 @@ export class S3PdfService {
     });
   }
 
+  // ============================================
+  // MÉTODOS DE DESCARGA Y EXTRACCIÓN
+  // ============================================
+
   /**
    * Descarga un PDF desde S3 y extrae su texto
    * @param s3Url - URL completa de S3 (s3://bucket/key o https://bucket.s3.region.amazonaws.com/key)
@@ -36,7 +40,7 @@ export class S3PdfService {
       // Descargar archivo de S3
       const buffer = await this.downloadFromS3(bucket, key);
 
-      // Extraer texto del PDF
+      // Extraer texto del PDF usando PDFParse v2.x
       const parser = new PDFParse({ data: buffer });
       const result = await parser.getText();
 
@@ -69,7 +73,7 @@ export class S3PdfService {
       const { bucket, key } = this.parseS3Url(s3Url);
       const buffer = await this.downloadFromS3(bucket, key);
 
-      // Extraer texto y metadata
+      // Extraer texto y metadata usando PDFParse v2.x
       const parser = new PDFParse({ data: buffer });
       const result = await parser.getText();
       const infoResult = await parser.getInfo();
@@ -137,6 +141,115 @@ export class S3PdfService {
       throw error;
     }
   }
+
+  // ============================================
+  // MÉTODOS DE SUBIDA
+  // ============================================
+
+  /**
+   * Sube un archivo (Buffer) a S3
+   * @param buffer - Contenido del archivo
+   * @param key - Ruta/key del archivo en S3 (ej: "evaluations/abc/rubrics/file.pdf")
+   * @param contentType - MIME type del archivo
+   * @returns URL de S3 del archivo subido (formato: s3://bucket/key)
+   */
+  async uploadToS3(
+    buffer: Buffer,
+    key: string,
+    contentType: string = 'application/pdf',
+  ): Promise<string> {
+    try {
+      const bucket = process.env.AWS_S3_BUCKET_NAME;
+      
+      if (!bucket) {
+        throw new BadRequestException('AWS_S3_BUCKET_NAME no está configurado en .env');
+      }
+
+      this.logger.log(`Subiendo archivo a S3: bucket=${bucket}, key=${key}, size=${buffer.length} bytes`);
+
+      const command = new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+        // Configuración de acceso (ajustar según necesidad)
+        ACL: 'public-read', // Para archivos públicos
+        // ACL: 'private', // Para archivos privados (default)
+        
+        // Metadata opcional
+        Metadata: {
+          uploadedAt: new Date().toISOString(),
+        },
+      });
+
+      await this.s3Client.send(command);
+
+      // Construir la URL de S3
+      const s3Url = `s3://${bucket}/${key}`;
+
+      this.logger.log(`✅ Archivo subido exitosamente: ${s3Url}`);
+
+      return s3Url;
+    } catch (error) {
+      this.logger.error('❌ Error al subir archivo a S3:', error);
+      throw new BadRequestException('Error al subir archivo a S3: ' + error.message);
+    }
+  }
+
+  /**
+   * Sube un archivo y retorna la URL HTTPS (en lugar de s3://)
+   * Útil si necesitas URLs públicas accesibles directamente
+   */
+  async uploadToS3WithHttpsUrl(
+    buffer: Buffer,
+    key: string,
+    contentType: string = 'application/pdf',
+  ): Promise<string> {
+    // Primero subir el archivo
+    await this.uploadToS3(buffer, key, contentType);
+    
+    const bucket = process.env.AWS_S3_BUCKET_NAME;
+    const region = process.env.AWS_REGION || 'us-east-1';
+    
+    // Construir URL HTTPS
+    const httpsUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+    
+    this.logger.log(`URL HTTPS generada: ${httpsUrl}`);
+    
+    return httpsUrl;
+  }
+
+  // ============================================
+  // MÉTODOS DE ELIMINACIÓN
+  // ============================================
+
+  /**
+   * Elimina un archivo de S3
+   * @param s3Url - URL completa de S3 (s3://bucket/key)
+   */
+  async deleteFromS3(s3Url: string): Promise<void> {
+    try {
+      const { bucket, key } = this.parseS3Url(s3Url);
+
+      this.logger.log(`Eliminando archivo de S3: bucket=${bucket}, key=${key}`);
+
+      const command = new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      });
+
+      await this.s3Client.send(command);
+
+      this.logger.log(`✅ Archivo eliminado exitosamente: ${s3Url}`);
+    } catch (error) {
+      this.logger.error('❌ Error al eliminar archivo de S3:', error);
+      throw new BadRequestException('Error al eliminar archivo de S3: ' + error.message);
+    }
+  }
+
+  // ============================================
+  // MÉTODOS AUXILIARES
+  // ============================================
 
   /**
    * Parsea una URL de S3 y extrae el bucket y key
@@ -217,7 +330,7 @@ export class S3PdfService {
   }
 
   /**
-   * Obtiene información del archivo sin descargarlo completamente (HEAD request)
+   * Obtiene información del archivo sin descargarlo completamente
    */
   async getS3FileInfo(s3Url: string): Promise<{
     bucket: string;

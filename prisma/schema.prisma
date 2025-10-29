@@ -1,0 +1,206 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SubmissionStatus {
+  PENDING
+  RECEIVED
+  ANALYZED
+  ERROR
+}
+
+enum ResultStatus {
+  PASS
+  FAIL
+  PARTIAL
+}
+
+enum ActivityType {
+  UPLOAD
+  ANALYZE
+  CREATE
+  UPDATE
+  EXPORT
+}
+
+model User {
+  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  fullName      String?        @map("full_name") @db.VarChar(120)
+  email         String?        @unique @db.VarChar(160)
+  institution   String?        @db.VarChar(160)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  note          String?        @db.Text
+  
+  evaluations   Evaluation[]
+  activityLogs  ActivityLog[]
+
+  @@map("users")
+}
+
+model Evaluation {
+  id           String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  ownerId      String?        @map("owner_id") @db.Uuid
+  title        String?        @db.VarChar(180)
+  description  String?        @db.Text
+  totalGroups  Int?           @map("total_groups")
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isArchived   Boolean        @default(false) @map("is_archived")
+  
+  owner        User?          @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  rubrics      Rubric[]
+  groups       Group[]
+  analyses     Analysis[]
+  activityLogs ActivityLog[]
+
+  @@index([ownerId])
+  @@index([title])
+  @@map("evaluations")
+}
+
+model Rubric {
+  id             String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  evaluationId   String           @map("evaluation_id") @db.Uuid
+  title          String?          @db.VarChar(160)
+  rubricPdfUrl   String?          @map("rubric_pdf_url") @db.VarChar(200)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  
+  evaluation     Evaluation       @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  rubricItems    RubricItem[]
+  analysisResults AnalysisResult[]
+
+  @@index([evaluationId])
+  @@map("rubrics")
+}
+
+model RubricItem {
+  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  rubricId   String   @map("rubric_id") @db.Uuid
+  itemOrder  Int      @map("item_order")
+  title      String   @db.VarChar(160)
+  conditions String?  @db.Text
+  maxScore   Decimal  @default(1.00) @map("max_score") @db.Decimal(6, 2)
+  
+  rubric     Rubric   @relation(fields: [rubricId], references: [id], onDelete: Cascade)
+
+  @@unique([rubricId, itemOrder], name: "uk_rubric_item_order")
+  @@index([rubricId])
+  @@map("rubric_items")
+}
+
+model Group {
+  id             String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  evaluationId   String           @map("evaluation_id") @db.Uuid
+  code           String?          @db.VarChar(40)
+  name           String?          @db.VarChar(160)
+  studentCount   Int              @default(0) @map("student_count")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  
+  evaluation     Evaluation       @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  submissions    Submission[]
+  recommendations Recommendation[]
+  activityLogs   ActivityLog[]
+
+  @@unique([evaluationId, code], name: "uk_group_code")
+  @@index([evaluationId])
+  @@map("groups")
+}
+
+model Submission {
+  id         String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  groupId    String           @map("group_id") @db.Uuid
+  fileName   String?          @map("file_name") @db.VarChar(240)
+  fileUrl    String?          @map("file_url") @db.VarChar(500)
+  status     SubmissionStatus @default(RECEIVED)
+  uploadedAt DateTime         @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+  checksum   String?          @db.VarChar(128)
+  meta       Json?            @db.JsonB
+  
+  group      Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@index([status])
+  @@map("submissions")
+}
+
+model Analysis {
+  id             String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  evaluationId   String           @map("evaluation_id") @db.Uuid
+  startedAt      DateTime         @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt        DateTime?        @map("ended_at") @db.Timestamptz(6)
+  engine         String           @default("SIMULATED") @db.VarChar(60)
+  notes          String?          @db.Text
+  
+  evaluation     Evaluation       @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  analysisResults AnalysisResult[]
+  recommendations Recommendation[]
+
+  @@index([evaluationId])
+  @@index([startedAt])
+  @@map("analyses")
+}
+
+model AnalysisResult {
+  id         String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  analysisId String       @map("analysis_id") @db.Uuid
+  rubricId   String       @map("rubric_id") @db.Uuid
+  status     ResultStatus @default(PARTIAL)
+  score      Decimal?     @db.Decimal(6, 2)
+  feedback   String?      @db.Text
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  
+  analysis   Analysis     @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  rubric     Rubric       @relation(fields: [rubricId], references: [id], onDelete: Cascade)
+
+  @@unique([analysisId], name: "uk_analysis_result")
+  @@index([analysisId])
+  @@index([rubricId])
+  @@map("analysis_results")
+}
+
+model Recommendation {
+  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  analysisId String   @map("analysis_id") @db.Uuid
+  groupId    String   @map("group_id") @db.Uuid
+  priority   Int      @default(2)
+  summary    String?  @db.VarChar(240)
+  details    String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  group      Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([analysisId])
+  @@index([groupId])
+  @@index([analysisId, groupId])
+  @@map("recommendations")
+}
+
+model ActivityLog {
+  id           String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  actorId      String?      @map("actor_id") @db.Uuid
+  evaluationId String?      @map("evaluation_id") @db.Uuid
+  groupId      String?      @map("group_id") @db.Uuid
+  type         ActivityType
+  message      String?      @db.Text
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  
+  actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  evaluation   Evaluation?  @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  group        Group?       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([evaluationId])
+  @@index([groupId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("activity_logs")
+}
