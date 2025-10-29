@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+// evaluations.service.ts
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3PdfService } from '../s3-pdf/s3-pdf.service';
 import { PdfService } from '../pdf/pdf.service';
@@ -23,9 +29,12 @@ export class EvaluationsService {
   ) {}
 
   /**
-   * Crear una evaluación con PDF opcional y rúbricas adicionales
+   * Crear una evaluación con PDF opcional y rubric items
    */
-  async createEvaluation(dto: CreateEvaluationDto, pdfFile?: Express.Multer.File) {
+  async createEvaluation(
+    dto: CreateEvaluationDto,
+    pdfFile?: Express.Multer.File,
+  ) {
     try {
       this.logger.log(`Creando evaluación: ${dto.title}`);
 
@@ -40,15 +49,15 @@ export class EvaluationsService {
           },
         });
 
-        // 2. Si hay PDF, subirlo a S3 y crear rúbrica desde PDF
+        // 2. SIEMPRE crear UNA rúbrica principal (con o sin PDF)
+        let rubric;
+
         if (pdfFile) {
+          // Si hay PDF, subirlo a S3 y crear rúbrica con URL
           this.logger.log(`Subiendo PDF a S3: ${pdfFile.originalname}`);
-          
-          // Aquí deberías implementar la subida a S3
-          // Por ahora asumimos que tienes un método en S3PdfService
           const s3Url = await this.uploadPdfToS3(pdfFile, evaluation.id);
 
-          await tx.rubric.create({
+          rubric = await tx.rubric.create({
             data: {
               evaluationId: evaluation.id,
               title: pdfFile.originalname.replace('.pdf', ''),
@@ -56,55 +65,63 @@ export class EvaluationsService {
             },
           });
         } else {
-          // Crear rúbrica por defecto sin PDF
-          await tx.rubric.create({
+          // Sin PDF, crear rúbrica por defecto
+          rubric = await tx.rubric.create({
             data: {
               evaluationId: evaluation.id,
-              title: `rubrica_de_${dto.title.toLowerCase().replace(/\s+/g, '_')}`,
+              title: `Rúbrica de ${dto.title}`,
             },
           });
         }
 
-        // 3. Crear rúbricas adicionales con sus items
-        if (dto.additionalRubrics && dto.additionalRubrics.length > 0) {
-          for (const additionalRubric of dto.additionalRubrics) {
-            const rubric = await tx.rubric.create({
+        // 3. Crear los rubricItems vinculados a la rúbrica principal
+        if (dto.rubricItems && dto.rubricItems.length > 0) {
+          this.logger.log(
+            `Creando ${dto.rubricItems.length} rubric items para la rúbrica`,
+          );
+
+          for (const item of dto.rubricItems) {
+            await tx.rubricItem.create({
               data: {
-                evaluationId: evaluation.id,
-                title: additionalRubric.title,
+                rubricId: rubric.id, // ✅ Vinculados a la rúbrica principal
+                itemOrder: item.itemOrder,
+                title: item.title,
+                conditions: item.conditions,
+                maxScore: item.maxScore || 1.0,
               },
             });
-
-            // Crear items de la rúbrica
-            for (const item of additionalRubric.items) {
-              await tx.rubricItem.create({
-                data: {
-                  rubricId: rubric.id,
-                  itemOrder: item.itemOrder,
-                  title: item.title,
-                  conditions: item.conditions,
-                  maxScore: item.maxScore || 1.0,
-                },
-              });
-            }
           }
         }
 
-        // Registrar actividad
+        // 4. Registrar actividad
         await tx.activityLog.create({
           data: {
             actorId: dto.ownerId,
             evaluationId: evaluation.id,
             type: 'CREATE',
-            message: `Evaluación "${dto.title}" creada`,
+            message: `Evaluación "${dto.title}" creada con rúbrica "${rubric.title}"`,
           },
         });
 
-        return evaluation;
+        // 5. Retornar evaluación completa con la rúbrica y sus items
+        return await tx.evaluation.findUnique({
+          where: { id: evaluation.id },
+          include: {
+            rubrics: {
+              include: {
+                rubricItems: {
+                  orderBy: { itemOrder: 'asc' },
+                },
+              },
+            },
+          },
+        });
       });
     } catch (error) {
       this.logger.error('Error al crear evaluación:', error);
-      throw new BadRequestException('Error al crear evaluación: ' + error.message);
+      throw new BadRequestException(
+        'Error al crear evaluación: ' + error.message,
+      );
     }
   }
 
@@ -155,7 +172,9 @@ export class EvaluationsService {
    * Listar todas las evaluaciones
    */
   async listEvaluations(ownerId?: string) {
-    const where = ownerId ? { ownerId, isArchived: false } : { isArchived: false };
+    const where = ownerId
+      ? { ownerId, isArchived: false }
+      : { isArchived: false };
 
     return await this.prisma.evaluation.findMany({
       where,
@@ -180,12 +199,12 @@ export class EvaluationsService {
   }
 
   /**
-   * Actualizar evaluación (puede agregar más rúbricas)
+   * Actualizar evaluación (puede agregar más rubric items a la rúbrica)
    */
   async updateEvaluation(id: string, dto: UpdateEvaluationDto) {
     try {
       return await this.prisma.$transaction(async (tx) => {
-        // Actualizar datos básicos
+        // 1. Actualizar datos básicos de la evaluación
         const evaluation = await tx.evaluation.update({
           where: { id },
           data: {
@@ -195,35 +214,64 @@ export class EvaluationsService {
           },
         });
 
-        // Agregar nuevas rúbricas adicionales
-        if (dto.additionalRubrics && dto.additionalRubrics.length > 0) {
-          for (const additionalRubric of dto.additionalRubrics) {
-            const rubric = await tx.rubric.create({
+        // 2. Agregar nuevos rubric items a la rúbrica existente
+        if (dto.additionalRubricItems && dto.additionalRubricItems.length > 0) {
+          // Obtener la rúbrica principal de esta evaluación
+          const rubric = await tx.rubric.findFirst({
+            where: { evaluationId: id },
+          });
+
+          if (!rubric) {
+            throw new BadRequestException(
+              'No se encontró rúbrica para esta evaluación',
+            );
+          }
+
+          // Obtener el último itemOrder para continuar la numeración
+          const lastItem = await tx.rubricItem.findFirst({
+            where: { rubricId: rubric.id },
+            orderBy: { itemOrder: 'desc' },
+          });
+
+          let nextOrder = lastItem ? lastItem.itemOrder + 1 : 1;
+
+          this.logger.log(
+            `Agregando ${dto.additionalRubricItems.length} rubric items adicionales`,
+          );
+
+          // Agregar los nuevos items
+          for (const item of dto.additionalRubricItems) {
+            await tx.rubricItem.create({
               data: {
-                evaluationId: id,
-                title: additionalRubric.title,
+                rubricId: rubric.id, // ✅ Se vinculan a la rúbrica principal
+                itemOrder: item.itemOrder || nextOrder++,
+                title: item.title,
+                conditions: item.conditions,
+                maxScore: item.maxScore || 1.0,
               },
             });
-
-            for (const item of additionalRubric.items) {
-              await tx.rubricItem.create({
-                data: {
-                  rubricId: rubric.id,
-                  itemOrder: item.itemOrder,
-                  title: item.title,
-                  conditions: item.conditions,
-                  maxScore: item.maxScore || 1.0,
-                },
-              });
-            }
           }
         }
 
-        return evaluation;
+        // 3. Retornar evaluación actualizada con todos los items
+        return await tx.evaluation.findUnique({
+          where: { id },
+          include: {
+            rubrics: {
+              include: {
+                rubricItems: {
+                  orderBy: { itemOrder: 'asc' },
+                },
+              },
+            },
+          },
+        });
       });
     } catch (error) {
       this.logger.error('Error al actualizar evaluación:', error);
-      throw new BadRequestException('Error al actualizar evaluación');
+      throw new BadRequestException(
+        'Error al actualizar evaluación: ' + error.message,
+      );
     }
   }
 
@@ -232,8 +280,6 @@ export class EvaluationsService {
    */
   async deleteEvaluation(id: string) {
     try {
-      // Prisma automáticamente eliminará todos los registros relacionados
-      // gracias a las reglas onDelete: Cascade en el schema
       await this.prisma.evaluation.delete({
         where: { id },
       });
@@ -318,14 +364,12 @@ export class EvaluationsService {
    * Obtener grupos de una evaluación con sus recomendaciones del último análisis
    */
   async getGroupsWithRecommendations(evaluationId: string) {
-    // Obtener el último análisis
     const lastAnalysis = await this.prisma.analysis.findFirst({
       where: { evaluationId },
       orderBy: { startedAt: 'desc' },
     });
 
     if (!lastAnalysis) {
-      // Si no hay análisis, solo retornar grupos
       const groups = await this.prisma.group.findMany({
         where: { evaluationId },
         include: {
@@ -346,7 +390,6 @@ export class EvaluationsService {
       };
     }
 
-    // Obtener grupos con sus recomendaciones
     const groups = await this.prisma.group.findMany({
       where: { evaluationId },
       include: {
@@ -369,6 +412,36 @@ export class EvaluationsService {
     };
   }
 
+  async getGroupsByEvaluationSimple(evaluationId: string) {
+    const groups = await this.prisma.group.findMany({
+      where: { evaluationId },
+      include: {
+        submissions: {
+          orderBy: { uploadedAt: 'desc' },
+          take: 1, // Solo la submission más reciente
+        },
+      },
+      orderBy: { code: 'asc' },
+    });
+
+    if (groups.length === 0) {
+      // Verificar si la evaluación existe
+      const evaluation = await this.prisma.evaluation.findUnique({
+        where: { id: evaluationId },
+      });
+
+      if (!evaluation) {
+        throw new NotFoundException(
+          `Evaluación con ID ${evaluationId} no encontrada`,
+        );
+      }
+    }
+
+    return groups;
+  }
+
+  
+
   // ============================================
   // SUBMISSIONS
   // ============================================
@@ -388,37 +461,45 @@ export class EvaluationsService {
   // HELPER: Subir PDF a S3
   // ============================================
 
-  private async uploadPdfToS3(file: Express.Multer.File, evaluationId: string): Promise<string> {
-  try {
-    // 1. Validar que sea un PDF
-    if (file.mimetype !== 'application/pdf') {
-      throw new BadRequestException('El archivo debe ser un PDF');
+  private async uploadPdfToS3(
+    file: Express.Multer.File,
+    evaluationId: string,
+  ): Promise<string> {
+    try {
+      // 1. Validar que sea un PDF
+      if (file.mimetype !== 'application/pdf') {
+        throw new BadRequestException('El archivo debe ser un PDF');
+      }
+
+      // 2. Validar tamaño (10MB máximo)
+      const maxSize = 10 * 1024 * 1024;
+      if (file.size > maxSize) {
+        throw new BadRequestException(`Archivo demasiado grande. Máximo: 10MB`);
+      }
+
+      // 3. Generar nombre único
+      const timestamp = Date.now();
+      const sanitizedFileName = file.originalname.replace(
+        /[^a-zA-Z0-9.-]/g,
+        '_',
+      );
+      const fileName = `evaluations/${evaluationId}/rubrics/${timestamp}_${sanitizedFileName}`;
+
+      // 4. Subir a S3 usando el servicio
+      const s3Url = await this.s3PdfService.uploadToS3(
+        file.buffer,
+        fileName,
+        file.mimetype,
+      );
+
+      this.logger.log(`✅ PDF subido exitosamente: ${s3Url}`);
+
+      return s3Url;
+    } catch (error) {
+      this.logger.error('❌ Error al subir PDF a S3:', error);
+      throw new BadRequestException(
+        'Error al subir archivo a S3: ' + error.message,
+      );
     }
-
-    // 2. Validar tamaño (10MB máximo)
-    const maxSize = 10 * 1024 * 1024;
-    if (file.size > maxSize) {
-      throw new BadRequestException(`Archivo demasiado grande. Máximo: 10MB`);
-    }
-
-    // 3. Generar nombre único
-    const timestamp = Date.now();
-    const sanitizedFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const fileName = `evaluations/${evaluationId}/rubrics/${timestamp}_${sanitizedFileName}`;
-
-    // 4. Subir a S3 usando el servicio
-    const s3Url = await this.s3PdfService.uploadToS3WithHttpsUrl(
-      file.buffer,
-      fileName,
-      file.mimetype,
-    );
-
-    this.logger.log(`✅ PDF subido exitosamente: ${s3Url}`);
-
-    return s3Url;
-  } catch (error) {
-    this.logger.error('❌ Error al subir PDF a S3:', error);
-    throw new BadRequestException('Error al subir archivo a S3: ' + error.message);
   }
-}
 }

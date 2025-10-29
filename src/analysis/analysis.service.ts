@@ -255,7 +255,7 @@ Evalúa este documento siguiendo ESTRICTAMENTE los criterios de la rúbrica. Sé
       });
 
       const completion = await openai.chat.completions.parse({
-        model: 'gpt-4o-2024-08-06', // Modelo que soporta structured outputs
+        model: 'gpt-4.1-nano', // Modelo que soporta structured outputs
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },

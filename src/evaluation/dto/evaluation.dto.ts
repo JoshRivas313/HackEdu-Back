@@ -45,25 +45,6 @@ export class CreateRubricItemDto {
   maxScore?: number;
 }
 
-export class CreateAdditionalRubricDto {
-  @ApiProperty({
-    description: 'Título de la rúbrica',
-    example: 'Rúbrica de Presentación Oral',
-  })
-  @IsString()
-  @IsNotEmpty()
-  title: string;
-
-  @ApiProperty({
-    description: 'Items de la rúbrica',
-    type: [CreateRubricItemDto],
-  })
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CreateRubricItemDto)
-  items: CreateRubricItemDto[];
-}
-
 export class CreateEvaluationDto {
   @ApiProperty({
     description: 'Título de la evaluación',
@@ -98,14 +79,19 @@ export class CreateEvaluationDto {
   ownerId?: string;
 
   @ApiPropertyOptional({
-    description: 'Rúbricas adicionales',
-    type: [CreateAdditionalRubricDto],
+    description: 'Items de la rúbrica (criterios de evaluación)',
+    type: [CreateRubricItemDto],
+    example: [
+      { itemOrder: 1, title: 'Claridad', conditions: 'Explicación clara y concisa', maxScore: 5 },
+      { itemOrder: 2, title: 'Coherencia', conditions: 'Ideas bien estructuradas', maxScore: 5 },
+      { itemOrder: 3, title: 'Originalidad', conditions: 'Aporte creativo', maxScore: 5 },
+    ]
   })
   @IsArray()
   @IsOptional()
   @ValidateNested({ each: true })
-  @Type(() => CreateAdditionalRubricDto)
-  additionalRubrics?: CreateAdditionalRubricDto[];
+  @Type(() => CreateRubricItemDto)
+  rubricItems?: CreateRubricItemDto[];
 }
 
 export class UpdateEvaluationDto {
@@ -134,14 +120,14 @@ export class UpdateEvaluationDto {
   totalGroups?: number;
 
   @ApiPropertyOptional({
-    description: 'Rúbricas adicionales para agregar',
-    type: [CreateAdditionalRubricDto],
+    description: 'Items adicionales para agregar a la rúbrica',
+    type: [CreateRubricItemDto],
   })
   @IsArray()
   @IsOptional()
   @ValidateNested({ each: true })
-  @Type(() => CreateAdditionalRubricDto)
-  additionalRubrics?: CreateAdditionalRubricDto[];
+  @Type(() => CreateRubricItemDto)
+  additionalRubricItems?: CreateRubricItemDto[];
 }
 
 export class CreateGroupDto {

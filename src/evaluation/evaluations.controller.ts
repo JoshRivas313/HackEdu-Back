@@ -48,42 +48,81 @@ export class EvaluationsController {
   @UseInterceptors(FileInterceptor('pdf'))
   @ApiOperation({ 
     summary: 'Crear nueva evaluación',
-    description: 'Crea una evaluación con rúbricas. Opcionalmente puede incluir un archivo PDF'
+    description: 'Crea una evaluación con una rúbrica y sus items de evaluación. Opcionalmente puede incluir un archivo PDF con la rúbrica.'
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
       type: 'object',
+      required: ['title'],
       properties: {
-        title: { type: 'string', example: 'Examen Final Matemáticas' },
-        description: { type: 'string', example: 'Evaluación comprensiva del curso' },
-        totalGroups: { type: 'number', example: 5 },
-        ownerId: { type: 'string', format: 'uuid' },
-        additionalRubrics: { 
+        title: { 
+          type: 'string', 
+          example: 'Examen Final Matemáticas',
+          description: 'Título de la evaluación'
+        },
+        description: { 
+          type: 'string', 
+          example: 'Evaluación comprensiva del curso',
+          description: 'Descripción detallada de la evaluación'
+        },
+        totalGroups: { 
+          type: 'number', 
+          example: 5,
+          description: 'Número esperado de grupos'
+        },
+        ownerId: { 
+          type: 'string', 
+          format: 'uuid',
+          description: 'ID del profesor propietario'
+        },
+        rubricItems: { 
           type: 'array',
+          description: 'Criterios de evaluación (rubric items)',
           items: {
             type: 'object',
+            required: ['itemOrder', 'title'],
             properties: {
-              title: { type: 'string' },
-              items: { type: 'array' }
+              itemOrder: { type: 'number', example: 1 },
+              title: { type: 'string', example: 'Claridad en la exposición' },
+              conditions: { type: 'string', example: 'Explicación clara y concisa' },
+              maxScore: { type: 'number', example: 5 }
             }
-          }
+          },
+          example: [
+            { itemOrder: 1, title: 'Claridad', conditions: 'Explicación clara', maxScore: 5 },
+            { itemOrder: 2, title: 'Coherencia', conditions: 'Ideas estructuradas', maxScore: 5 },
+            { itemOrder: 3, title: 'Originalidad', conditions: 'Aporte creativo', maxScore: 5 }
+          ]
         },
-        pdf: { type: 'string', format: 'binary' }
+        pdf: { 
+          type: 'string', 
+          format: 'binary',
+          description: 'Archivo PDF de la rúbrica (opcional)'
+        }
       }
     }
   })
   @ApiResponse({ 
     status: 201, 
-    description: 'Evaluación creada exitosamente',
+    description: 'Evaluación creada exitosamente con su rúbrica y rubric items',
     schema: {
       example: {
         success: true,
         message: 'Evaluación creada exitosamente',
         data: {
-          id: 'uuid',
+          id: 'uuid-evaluation',
           title: 'Examen Final',
-          rubrics: []
+          rubrics: [
+            {
+              id: 'uuid-rubric',
+              title: 'Rúbrica de Examen Final',
+              rubricItems: [
+                { id: 'uuid-item-1', itemOrder: 1, title: 'Claridad', maxScore: 5 },
+                { id: 'uuid-item-2', itemOrder: 2, title: 'Coherencia', maxScore: 5 }
+              ]
+            }
+          ]
         }
       }
     }
@@ -113,7 +152,7 @@ export class EvaluationsController {
   @Get(':id')
   @ApiOperation({ 
     summary: 'Obtener evaluación por ID',
-    description: 'Retorna una evaluación completa con todas sus relaciones (rúbricas, grupos, submissions)'
+    description: 'Retorna una evaluación completa con su rúbrica, rubric items, grupos y submissions'
   })
   @ApiParam({ name: 'id', description: 'ID de la evaluación', type: 'string' })
   @ApiResponse({ 
@@ -126,7 +165,16 @@ export class EvaluationsController {
           id: 'uuid',
           title: 'Examen Final',
           description: 'Evaluación del curso',
-          rubrics: [],
+          rubrics: [
+            {
+              id: 'rubric-uuid',
+              title: 'Rúbrica Principal',
+              rubricItems: [
+                { itemOrder: 1, title: 'Claridad' },
+                { itemOrder: 2, title: 'Coherencia' }
+              ]
+            }
+          ],
           groups: []
         }
       }
@@ -145,7 +193,7 @@ export class EvaluationsController {
   @Get()
   @ApiOperation({ 
     summary: 'Listar todas las evaluaciones',
-    description: 'Obtiene todas las evaluaciones, opcionalmente filtradas por owner'
+    description: 'Obtiene todas las evaluaciones con sus rúbricas, opcionalmente filtradas por owner'
   })
   @ApiQuery({ 
     name: 'ownerId', 
@@ -160,8 +208,16 @@ export class EvaluationsController {
       example: {
         success: true,
         data: [
-          { id: 'uuid1', title: 'Evaluación 1' },
-          { id: 'uuid2', title: 'Evaluación 2' }
+          { 
+            id: 'uuid1', 
+            title: 'Evaluación 1',
+            rubrics: [{ title: 'Rúbrica 1', rubricItems: [] }]
+          },
+          { 
+            id: 'uuid2', 
+            title: 'Evaluación 2',
+            rubrics: [{ title: 'Rúbrica 2', rubricItems: [] }]
+          }
         ]
       }
     }
@@ -178,13 +234,31 @@ export class EvaluationsController {
   @Put(':id')
   @ApiOperation({ 
     summary: 'Actualizar evaluación',
-    description: 'Actualiza los datos de una evaluación. Puede agregar más rúbricas'
+    description: 'Actualiza los datos de una evaluación. Puede agregar más rubric items a la rúbrica existente'
   })
   @ApiParam({ name: 'id', description: 'ID de la evaluación', type: 'string' })
   @ApiBody({ type: UpdateEvaluationDto })
   @ApiResponse({ 
     status: 200, 
-    description: 'Evaluación actualizada exitosamente' 
+    description: 'Evaluación actualizada exitosamente',
+    schema: {
+      example: {
+        success: true,
+        message: 'Evaluación actualizada exitosamente',
+        data: {
+          id: 'uuid',
+          title: 'Evaluación Actualizada',
+          rubrics: [
+            {
+              rubricItems: [
+                { itemOrder: 1, title: 'Item existente' },
+                { itemOrder: 2, title: 'Item nuevo agregado' }
+              ]
+            }
+          ]
+        }
+      }
+    }
   })
   @ApiResponse({ status: 404, description: 'Evaluación no encontrada' })
   async updateEvaluation(
@@ -203,7 +277,7 @@ export class EvaluationsController {
   @Delete(':id')
   @ApiOperation({ 
     summary: 'Eliminar evaluación',
-    description: 'Elimina una evaluación y todas sus relaciones (cascade delete)'
+    description: 'Elimina una evaluación y todas sus relaciones: rúbrica, rubric items, grupos, submissions (cascade delete)'
   })
   @ApiParam({ name: 'id', description: 'ID de la evaluación', type: 'string' })
   @ApiResponse({ 
@@ -237,6 +311,75 @@ export class EvaluationsController {
   // ============================================
   // GRUPOS
   // ============================================
+
+  @Get(':evaluationId/groups')
+  @ApiOperation({ 
+    summary: 'Obtener grupos por evaluación',
+    description: 'Retorna todos los grupos asociados a una evaluación específica con sus submissions y estadísticas'
+  })
+  @ApiParam({ 
+    name: 'evaluationId', 
+    description: 'ID de la evaluación', 
+    type: 'string',
+    example: 'clx1234567890abcdef'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Grupos de la evaluación obtenidos exitosamente',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          evaluation: {
+            id: 'eval-uuid',
+            title: 'Examen Final Matemáticas'
+          },
+          totalGroups: 3,
+          groups: [
+            {
+              id: 'group-uuid-1',
+              code: 'G001',
+              name: 'Grupo A',
+              studentCount: 4,
+              createdAt: '2025-10-20T10:00:00Z',
+              submissions: [
+                {
+                  id: 'sub-uuid-1',
+                  fileName: 'proyecto_grupoA.pdf',
+                  fileUrl: 's3://bucket/file.pdf',
+                  status: 'RECEIVED',
+                  uploadedAt: '2025-10-25T14:30:00Z'
+                }
+              ],
+              _count: {
+                submissions: 1,
+                recommendations: 3
+              }
+            },
+            {
+              id: 'group-uuid-2',
+              code: 'G002',
+              name: 'Grupo B',
+              studentCount: 3,
+              submissions: [],
+              _count: {
+                submissions: 0,
+                recommendations: 0
+              }
+            }
+          ]
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 404, description: 'Evaluación no encontrada' })
+  async getGroupsByEvaluation(@Param('evaluationId') evaluationId: string) {
+    const data = await this.evaluationsService.getGroupsByEvaluationSimple(evaluationId);
+    return {
+      success: true,
+      data,
+    };
+  }
 
   @Post('groups')
   @ApiOperation({ 
@@ -366,7 +509,7 @@ export class EvaluationsController {
   @Post(':id/analyze')
   @ApiOperation({ 
     summary: 'Analizar evaluación con IA',
-    description: 'Inicia el análisis de una evaluación usando OpenAI. Procesa todas las submissions y genera recomendaciones'
+    description: 'Inicia el análisis de una evaluación usando OpenAI. Procesa todas las submissions usando los rubric items como criterios y genera recomendaciones'
   })
   @ApiParam({ name: 'id', description: 'ID de la evaluación a analizar', type: 'string' })
   @ApiResponse({ 
