@@ -486,7 +486,7 @@ export class EvaluationsService {
       const fileName = `evaluations/${evaluationId}/rubrics/${timestamp}_${sanitizedFileName}`;
 
       // 4. Subir a S3 usando el servicio
-      const s3Url = await this.s3PdfService.uploadToS3(
+      const s3Url = await this.s3PdfService.uploadToS3WithHttpsUrl(
         file.buffer,
         fileName,
         file.mimetype,

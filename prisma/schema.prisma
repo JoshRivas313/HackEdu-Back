@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,75 +7,51 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum SubmissionStatus {
-  PENDING
-  RECEIVED
-  ANALYZED
-  ERROR
-}
-
-enum ResultStatus {
-  PASS
-  FAIL
-  PARTIAL
-}
-
-enum ActivityType {
-  UPLOAD
-  ANALYZE
-  CREATE
-  UPDATE
-  EXPORT
-}
-
 model User {
-  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  fullName      String?        @map("full_name") @db.VarChar(120)
-  email         String?        @unique @db.VarChar(160)
-  institution   String?        @db.VarChar(160)
-  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  note          String?        @db.Text
-  
-  evaluations   Evaluation[]
-  activityLogs  ActivityLog[]
+  id           String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  fullName     String?       @map("full_name") @db.VarChar(120)
+  email        String?       @unique @db.VarChar(160)
+  institution  String?       @db.VarChar(160)
+  createdAt    DateTime?     @default(now()) @map("created_at") @db.Timestamptz(6)
+  note         String?
+  activityLogs ActivityLog[]
+  evaluations  Evaluation[]
 
   @@map("users")
 }
 
 model Evaluation {
-  id           String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  ownerId      String?        @map("owner_id") @db.Uuid
-  title        String?        @db.VarChar(180)
-  description  String?        @db.Text
-  totalGroups  Int?           @map("total_groups")
-  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  isArchived   Boolean        @default(false) @map("is_archived")
-  
-  owner        User?          @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  rubrics      Rubric[]
-  groups       Group[]
-  analyses     Analysis[]
+  id           String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  ownerId      String?       @map("owner_id") @db.Uuid
+  title        String?       @db.VarChar(180)
+  description  String?
+  totalGroups  Int?          @map("total_groups")
+  createdAt    DateTime?     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime?     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isArchived   Boolean?      @default(false) @map("is_archived")
   activityLogs ActivityLog[]
+  analyses     Analysis[]
+  owner        User?         @relation(fields: [ownerId], references: [id], onUpdate: NoAction, map: "fk_evaluations_owner")
+  groups       Group[]
+  rubrics      Rubric[]
 
-  @@index([ownerId])
-  @@index([title])
+  @@index([ownerId], map: "idx_evaluations_owner")
+  @@index([title], map: "idx_evaluations_title")
   @@map("evaluations")
 }
 
 model Rubric {
-  id             String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  evaluationId   String           @map("evaluation_id") @db.Uuid
-  title          String?          @db.VarChar(160)
-  rubricPdfUrl   String?          @map("rubric_pdf_url") @db.VarChar(200)
-  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  
-  evaluation     Evaluation       @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
-  rubricItems    RubricItem[]
+  id              String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  evaluationId    String           @map("evaluation_id") @db.Uuid
+  title           String?          @db.VarChar(160)
+  rubricPdfUrl    String?          @map("rubric_pdf_url") @db.VarChar(200)
+  createdAt       DateTime?        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime?        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   analysisResults AnalysisResult[]
+  rubricItems     RubricItem[]
+  evaluation      Evaluation       @relation(fields: [evaluationId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_rubrics_evaluation")
 
-  @@index([evaluationId])
+  @@index([evaluationId], map: "idx_rubrics_evaluation")
   @@map("rubrics")
 }
 
@@ -87,120 +60,133 @@ model RubricItem {
   rubricId   String   @map("rubric_id") @db.Uuid
   itemOrder  Int      @map("item_order")
   title      String   @db.VarChar(160)
-  conditions String?  @db.Text
-  maxScore   Decimal  @default(1.00) @map("max_score") @db.Decimal(6, 2)
-  
-  rubric     Rubric   @relation(fields: [rubricId], references: [id], onDelete: Cascade)
+  conditions String?
+  maxScore   Decimal? @default(1.00) @map("max_score") @db.Decimal(6, 2)
+  rubric     Rubric   @relation(fields: [rubricId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_rubric_items_rubric")
 
-  @@unique([rubricId, itemOrder], name: "uk_rubric_item_order")
-  @@index([rubricId])
+  @@unique([rubricId, itemOrder], name: "uk_rubric_item_order", map: "uk_rubric_item_order")
+  @@index([rubricId], map: "idx_rubric_items_rubric")
   @@map("rubric_items")
 }
 
 model Group {
-  id             String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  evaluationId   String           @map("evaluation_id") @db.Uuid
-  code           String?          @db.VarChar(40)
-  name           String?          @db.VarChar(160)
-  studentCount   Int              @default(0) @map("student_count")
-  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  
-  evaluation     Evaluation       @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
-  submissions    Submission[]
+  id              String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  evaluationId    String           @map("evaluation_id") @db.Uuid
+  code            String?          @db.VarChar(40)
+  name            String?          @db.VarChar(160)
+  studentCount    Int?             @default(0) @map("student_count")
+  createdAt       DateTime?        @default(now()) @map("created_at") @db.Timestamptz(6)
+  activityLogs    ActivityLog[]
+  evaluation      Evaluation       @relation(fields: [evaluationId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_groups_evaluation")
   recommendations Recommendation[]
-  activityLogs   ActivityLog[]
+  submissions     Submission[]
 
-  @@unique([evaluationId, code], name: "uk_group_code")
-  @@index([evaluationId])
+  @@unique([evaluationId, code], name: "uk_group_code", map: "uk_group_code")
+  @@index([evaluationId], map: "idx_groups_evaluation")
   @@map("groups")
 }
 
 model Submission {
-  id         String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  groupId    String           @map("group_id") @db.Uuid
-  fileName   String?          @map("file_name") @db.VarChar(240)
-  fileUrl    String?          @map("file_url") @db.VarChar(500)
-  status     SubmissionStatus @default(RECEIVED)
-  uploadedAt DateTime         @default(now()) @map("uploaded_at") @db.Timestamptz(6)
-  checksum   String?          @db.VarChar(128)
-  meta       Json?            @db.JsonB
-  
-  group      Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id         String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  groupId    String             @map("group_id") @db.Uuid
+  fileName   String?            @map("file_name") @db.VarChar(240)
+  fileUrl    String?            @map("file_url") @db.VarChar(500)
+  status     submission_status? @default(RECEIVED)
+  uploadedAt DateTime?          @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+  checksum   String?            @db.VarChar(128)
+  meta       Json?
+  group      Group              @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_submissions_group")
 
-  @@index([groupId])
-  @@index([status])
+  @@index([groupId], map: "idx_submissions_group")
+  @@index([status], map: "idx_submissions_status")
   @@map("submissions")
 }
 
 model Analysis {
-  id             String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  evaluationId   String           @map("evaluation_id") @db.Uuid
-  startedAt      DateTime         @default(now()) @map("started_at") @db.Timestamptz(6)
-  endedAt        DateTime?        @map("ended_at") @db.Timestamptz(6)
-  engine         String           @default("SIMULATED") @db.VarChar(60)
-  notes          String?          @db.Text
-  
-  evaluation     Evaluation       @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
-  analysisResults AnalysisResult[]
+  id              String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  evaluationId    String           @map("evaluation_id") @db.Uuid
+  startedAt       DateTime?        @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt         DateTime?        @map("ended_at") @db.Timestamptz(6)
+  engine          String?          @default("SIMULATED") @db.VarChar(60)
+  notes           String?
+  evaluation      Evaluation       @relation(fields: [evaluationId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_analyses_evaluation")
+  analysisResults AnalysisResult?
   recommendations Recommendation[]
 
-  @@index([evaluationId])
-  @@index([startedAt])
+  @@index([evaluationId], map: "idx_analyses_evaluation")
+  @@index([startedAt], map: "idx_analyses_started_at")
   @@map("analyses")
 }
 
 model AnalysisResult {
-  id         String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  analysisId String       @map("analysis_id") @db.Uuid
-  rubricId   String       @map("rubric_id") @db.Uuid
-  status     ResultStatus @default(PARTIAL)
-  score      Decimal?     @db.Decimal(6, 2)
-  feedback   String?      @db.Text
-  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  
-  analysis   Analysis     @relation(fields: [analysisId], references: [id], onDelete: Cascade)
-  rubric     Rubric       @relation(fields: [rubricId], references: [id], onDelete: Cascade)
+  id         String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  analysisId String        @unique(map: "uk_analysis_result") @map("analysis_id") @db.Uuid
+  rubricId   String        @map("rubric_id") @db.Uuid
+  status     result_status @default(PARTIAL)
+  score      Decimal?      @db.Decimal(6, 2)
+  feedback   String?
+  createdAt  DateTime?     @default(now()) @map("created_at") @db.Timestamptz(6)
+  analysis   Analysis      @relation(fields: [analysisId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_analysis_results_analysis")
+  rubric     Rubric        @relation(fields: [rubricId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_analysis_results_rubric")
 
-  @@unique([analysisId], name: "uk_analysis_result")
-  @@index([analysisId])
-  @@index([rubricId])
+  @@index([analysisId], map: "idx_analysis_results_analysis")
+  @@index([rubricId], map: "idx_analysis_results_rubric")
   @@map("analysis_results")
 }
 
 model Recommendation {
-  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  analysisId String   @map("analysis_id") @db.Uuid
-  groupId    String   @map("group_id") @db.Uuid
-  priority   Int      @default(2)
-  summary    String?  @db.VarChar(240)
-  details    String?  @db.Text
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  
-  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
-  group      Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  analysisId String    @map("analysis_id") @db.Uuid
+  groupId    String    @map("group_id") @db.Uuid
+  priority   Int?      @default(2)
+  summary    String?   @db.VarChar(240)
+  details    String?
+  createdAt  DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  analysis   Analysis  @relation(fields: [analysisId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_recommendations_analysis")
+  group      Group     @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_recommendations_group")
 
-  @@index([analysisId])
-  @@index([groupId])
-  @@index([analysisId, groupId])
+  @@index([analysisId], map: "idx_recommendations_analysis")
+  @@index([analysisId, groupId], map: "idx_recommendations_analysis_group")
+  @@index([groupId], map: "idx_recommendations_group")
   @@map("recommendations")
 }
 
 model ActivityLog {
-  id           String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  actorId      String?      @map("actor_id") @db.Uuid
-  evaluationId String?      @map("evaluation_id") @db.Uuid
-  groupId      String?      @map("group_id") @db.Uuid
-  type         ActivityType
-  message      String?      @db.Text
-  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  
-  actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
-  evaluation   Evaluation?  @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
-  group        Group?       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id           String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  actorId      String?       @map("actor_id") @db.Uuid
+  evaluationId String?       @map("evaluation_id") @db.Uuid
+  groupId      String?       @map("group_id") @db.Uuid
+  type         activity_type
+  message      String?
+  createdAt    DateTime?     @default(now()) @map("created_at") @db.Timestamptz(6)
+  actor        User?         @relation(fields: [actorId], references: [id], onUpdate: NoAction, map: "fk_activity_logs_actor")
+  evaluation   Evaluation?   @relation(fields: [evaluationId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_activity_logs_evaluation")
+  group        Group?        @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_activity_logs_group")
 
-  @@index([evaluationId])
-  @@index([groupId])
-  @@index([type])
-  @@index([createdAt])
+  @@index([createdAt], map: "idx_activity_logs_created_at")
+  @@index([evaluationId], map: "idx_activity_logs_evaluation")
+  @@index([groupId], map: "idx_activity_logs_group")
+  @@index([type], map: "idx_activity_logs_type")
   @@map("activity_logs")
+}
+
+enum activity_type {
+  UPLOAD
+  ANALYZE
+  CREATE
+  UPDATE
+  EXPORT
+}
+
+enum result_status {
+  PASS
+  FAIL
+  PARTIAL
+}
+
+enum submission_status {
+  PENDING
+  RECEIVED
+  ANALYZED
+  ERROR
 }

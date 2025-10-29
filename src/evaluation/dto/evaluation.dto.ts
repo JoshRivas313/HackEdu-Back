@@ -18,6 +18,7 @@ export class CreateRubricItemDto {
   })
   @IsNumber()
   @IsNotEmpty()
+  @Type(() => Number)
   itemOrder: number;
 
   @ApiProperty({
@@ -42,6 +43,7 @@ export class CreateRubricItemDto {
   })
   @IsNumber()
   @IsOptional()
+  @Type(() => Number)
   maxScore?: number;
 }
 
@@ -68,6 +70,7 @@ export class CreateEvaluationDto {
   })
   @IsNumber()
   @IsOptional()
+  @Type(() => Number)
   totalGroups?: number;
 
   @ApiPropertyOptional({
@@ -84,7 +87,6 @@ export class CreateEvaluationDto {
     example: [
       { itemOrder: 1, title: 'Claridad', conditions: 'Explicación clara y concisa', maxScore: 5 },
       { itemOrder: 2, title: 'Coherencia', conditions: 'Ideas bien estructuradas', maxScore: 5 },
-      { itemOrder: 3, title: 'Originalidad', conditions: 'Aporte creativo', maxScore: 5 },
     ]
   })
   @IsArray()
@@ -117,6 +119,7 @@ export class UpdateEvaluationDto {
   })
   @IsNumber()
   @IsOptional()
+  @Type(() => Number)
   totalGroups?: number;
 
   @ApiPropertyOptional({
@@ -129,6 +132,7 @@ export class UpdateEvaluationDto {
   @Type(() => CreateRubricItemDto)
   additionalRubricItems?: CreateRubricItemDto[];
 }
+
 
 export class CreateGroupDto {
   @ApiProperty({

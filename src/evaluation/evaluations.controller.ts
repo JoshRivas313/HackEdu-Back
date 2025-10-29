@@ -31,6 +31,7 @@ import {
   UpdateGroupDto,
   CreateSubmissionDto,
 } from './dto/evaluation.dto';
+import { ParseJsonFormDataInterceptor } from 'src/common/interceptors/parse-json-form-data.interceptors';
 
 @ApiTags('evaluations')
 @Controller('evaluations')
@@ -45,7 +46,8 @@ export class EvaluationsController {
   // ============================================
 
   @Post()
-  @UseInterceptors(FileInterceptor('pdf'))
+  @UseInterceptors(FileInterceptor('pdf'),
+ new ParseJsonFormDataInterceptor(['rubricItems']))
   @ApiOperation({ 
     summary: 'Crear nueva evaluación',
     description: 'Crea una evaluación con una rúbrica y sus items de evaluación. Opcionalmente puede incluir un archivo PDF con la rúbrica.'
